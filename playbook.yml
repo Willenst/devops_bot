@@ -1,0 +1,172 @@
+- name: postgres install #Общий плейбук под установку базы на двух машинах
+  hosts: host1, host2    
+  become: yes   
+
+  vars_files: #переменные для базы
+    - vars.yml
+
+  pre_tasks: #Подгрузка всех необходимых пакетов
+
+    - name: install packeges
+      apt:
+        name:
+          - python3
+          - python3-pip
+          - python3-psycopg2
+          - postgresql
+          - postgresql-contrib
+        state: present
+
+
+  tasks: #создание директории под репликацию, выдаем права на владение для постгреса
+
+    - name: replication folder
+      become: yes
+      file:
+        path: /oracle/pg_data/archive/
+        state: directory
+        owner: postgres
+        group: postgres
+        mode: '0755'
+
+    - name: health check 1 #Проверяем что создался конфиг
+      ansible.builtin.stat:
+        path: "/var/lib/pgsql/data/pg_hba.conf"
+      register: postgres_data
+
+    - name: start postgres #запускаем постгрес
+      service: "name={{ item }} state=started enabled=yes"
+      with_items:
+        - postgresql
+
+- name: postgres main #плейбук для машины с основной базой
+  hosts: host1    
+  become: yes   
+
+  vars_files: #переменные для базы
+    - vars.yml
+
+  tasks:
+    - name: db user allow #Разрешение на подключение к базе по паролю. В нашем случае - для бота
+      postgresql_pg_hba:
+        dest: "/etc/postgresql/14/main/pg_hba.conf"
+        contype: host
+        databases: all
+        method: password
+        users: all
+        address: all
+        create: true
+      become: yes
+      become_user: postgres
+      notify: restart postgres
+
+    - name: replica allow #разрешение на репликацию, сделал trust так как стоит фильтр по адресу
+      postgresql_pg_hba:
+        dest: "/etc/postgresql/14/main/pg_hba.conf"
+        contype: host
+        databases: replication
+        method: trust
+        users: all
+        address: 192.168.172.159/32
+        create: true
+      become: yes
+      become_user: postgres
+      notify: restart postgres
+
+
+    - name: db creation #создание бд
+      become: true
+      become_user: postgres
+      postgresql_db: name={{ db_name }}
+            template='template0'
+            state=present
+
+    - name: add user #добавляем юзера в бд
+      become: true
+      become_user: postgres
+      postgresql_user: db={{ db_name }}
+            name={{ db_user }}
+            password={{ db_password }}
+            priv=ALL
+            state=present
+
+    - name: init.sql #добавляем файл с созданием стартовых табличек и редактированием конфигов субд
+      copy:
+        src: /home/ansible/init.sql 
+        dest: /init.sql 
+        owner: postgres
+        group: postgres
+        mode: '0755'  
+
+    - name: Add data #Собственно выполнение файла
+      become: true
+      become_user: postgres
+      shell: psql -d {{ db_name }} -f /init.sql
+
+  handlers: #рестарт постгры если чет пошло не так
+    - name: restart postgres
+      service: name=postgresql state=restarted
+
+- name: postgres replica #плейбук для репликации
+  hosts: host2    
+  become: yes
+  tasks:
+
+    - name: Remove contents of PostgreSQL data directory #очистка имеющихся файлов
+      file:
+        path: /var/lib/postgresql/14/main
+        state: absent
+
+
+    - name: "Replication cmd" #запуск репликации базы
+      command: pg_basebackup -R -h 192.168.172.150 -U repl_user -D /var/lib/postgresql/14/main -P
+      become: true
+      become_user: postgres   
+
+
+- name: python #блок бота
+  hosts: host3
+  become: yes
+  pre_tasks: 
+    - name: install pip3 #подгрузка необходимых пакетов для подгрузки необходимых пакетов :)
+      apt:
+        name:
+          - python3
+          - python3-pip
+          - python3-psycopg2
+        state: present
+    - name: install packages #тут подгрузка пакетов для бота
+      pip:
+        name:
+          - paramiko
+          - requests
+          - python-dotenv
+          - python-telegram-bot==13.7
+        executable: pip3
+
+
+  tasks:
+    - name: bot project #тут качаем проекто бота с гитхаба
+      get_url:
+        url: https://raw.githubusercontent.com/Willenst/devops_bot/docker/bot_image/botoslav.py 
+        dest: /home/ansible
+
+    - name: copy env #копируем файл .env
+      copy:
+        src: /home/ansible/.env 
+        dest: /home/ansible/.env  
+        owner: kali
+        group: kali
+        mode: '0755'   
+
+    - name: redact #тк файл бота изначально предназначен под логи с докера, тут надо немного его переделать что бы он брал логи с машины
+      lineinfile: 
+        path: /home/ansible/botoslav.py
+        regexp: '^\s*update\.message\.reply_text\(ssh\(''docker ps -aqf "name=db_repl_1" \| xargs docker logs''\)\)'
+        line: '    update.message.reply_text(ssh("cat /var/log/postgresql/postgresql-14-main.log | grep repl_user | tail"))'
+        backrefs: yes
+
+
+    - name: Run project #пуск самого проекта
+      command: python3 /home/ansible/botoslav.py
+

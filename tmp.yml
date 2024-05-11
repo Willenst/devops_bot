@@ -1,0 +1,4 @@
+    - name: "Replication cmd" #запуск репликации базы
+      command: pg_basebackup -R -h <IP_MASTER_SERVER> -U repl_user -D /var/lib/postgresql/15/main -P
+      become: true
+      become_user: postgres

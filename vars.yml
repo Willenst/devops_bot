@@ -1,0 +1,6 @@
+db_user: postgres
+db_password: Qq12345
+db_name: db_botoslav
+db_replica_user: repl_user
+db_password: repl_user
+
