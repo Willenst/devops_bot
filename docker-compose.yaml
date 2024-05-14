@@ -12,21 +12,21 @@ x-postgres-common:
 
 
 services:
-  bot_image:
+  bot:
     build: 
-      context: ./bot_image
+      context: ./bot
     depends_on:
-      - db_image
+      - db
     volumes:
       - .env:/app/.env
     networks:
       bot_net:
         ipv4_address: 172.16.238.2
 
-  db_image:
+  db:
     <<: *postgres-common
     build: 
-      context: ./db_image
+      context: ./db
       args:
         - DB_REPL_USER=${DB_REPL_USER}
         - DB_REPL_PASSWORD=${DB_REPL_PASSWORD}
@@ -52,7 +52,7 @@ services:
   db_repl:
     <<: *postgres-common
     build:
-      context: ./db_repl_image
+      context: ./db_repl
     ports:
       - "${DB_REPL_PORT}:${DB_PORT}"
     networks:
@@ -74,7 +74,7 @@ services:
       postgres
       "
     depends_on:
-      - db_image
+      - db
     logging:
       driver: "json-file"
 
@@ -84,3 +84,4 @@ networks:
     ipam:
       config:
         - subnet: 172.16.238.0/24
+
