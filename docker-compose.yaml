@@ -12,9 +12,9 @@ x-postgres-common:
 
 
 services:
-  bot:
+  bot_image:
     build: 
-      context: ./bot
+      context: ./bot_image
     depends_on:
       - db
     volumes:
@@ -23,10 +23,10 @@ services:
       bot_net:
         ipv4_address: 172.16.238.2
 
-  db:
+  db_image:
     <<: *postgres-common
     build: 
-      context: ./db
+      context: ./db_image
       args:
         - DB_REPL_USER=${DB_REPL_USER}
         - DB_REPL_PASSWORD=${DB_REPL_PASSWORD}
@@ -49,10 +49,10 @@ services:
       bot_net:
         ipv4_address: ${DB_HOST}
 
-  db_repl:
+  db_repl_image:
     <<: *postgres-common
     build:
-      context: ./db_repl
+      context: ./db_repl_image
     ports:
       - "${DB_REPL_PORT}:${DB_PORT}"
     networks:
